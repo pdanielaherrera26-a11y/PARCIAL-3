@@ -1,0 +1,272 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "gpuType": "T4",
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    },
+    "accelerator": "GPU"
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/pdanielaherrera26-a11y/PARCIAL-3/blob/main/PARCIAL3\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "ENCODER"
+      ],
+      "metadata": {
+        "id": "kTJiMm-GHSCV"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from datasets import load_dataset\n",
+        "from langchain_text_splitters import RecursiveCharacterTextSplitter\n",
+        "import re\n",
+        "\n",
+        "# --- 1. CARGA Y REDUCCIÓN DEL DATASET ---\n",
+        "# Cargamos el dataset completo\n",
+        "ds_full = load_dataset(\"corbt/all-recipes\", split=\"train\")\n",
+        "\n",
+        "# **Paso de Reducción:** Tomamos solo las primeras 2000 filas para acelerar el proceso.\n",
+        "# Esto reduce drásticamente el número de chunks y el tiempo de vectorización.\n",
+        "ds = ds_full.select(range(2000))\n",
+        "\n",
+        "print(f\"Dataset reducido a: {len(ds)} documentos.\")\n",
+        "\n",
+        "def clean_text(s: str) -> str:\n",
+        "    if s is None:\n",
+        "        return \"\"\n",
+        "    s = str(s)\n",
+        "    s = s.replace(\"\\n\", \" \")\n",
+        "    s = re.sub(r\"\\s+\", \" \", s).strip()\n",
+        "    return s\n",
+        "\n",
+        "# Aplicamos limpieza y renombramos la columna\n",
+        "ds = ds.map(lambda row: {\n",
+        "    \"text\": clean_text(row[\"input\"])\n",
+        "})\n",
+        "\n",
+        "print(\"Texto limpio de la primera receta (ej.):\", ds[0][\"text\"][:300])\n",
+        "\n",
+        "# Filtramos filas vacías\n",
+        "ds = ds.filter(lambda row: row[\"text\"] != \"\")\n",
+        "print(f\"Documentos después de filtrar y limpiar: {len(ds)}\")\n",
+        "\n",
+        "\n",
+        "# --- 2. CREACIÓN DE CHUNKS ---\n",
+        "\n",
+        "splitter = RecursiveCharacterTextSplitter(\n",
+        "    chunk_size=512,\n",
+        "    chunk_overlap=150,\n",
+        "    separators=[\"\\n\\n\", \"\\n\", \". \", \" \", \"\"]\n",
+        ")\n",
+        "\n",
+        "docs_texts = []\n",
+        "docs_meta = []\n",
+        "\n",
+        "# Iteramos sobre el dataset reducido\n",
+        "for i, row in enumerate(ds):\n",
+        "    chunks = splitter.split_text(row[\"text\"])\n",
+        "    for j, ch in enumerate(chunks):\n",
+        "        docs_texts.append(ch)\n",
+        "        docs_meta.append({\n",
+        "            \"doc_id\": i,\n",
+        "            \"chunk\": j\n",
+        "        })\n",
+        "\n",
+        "print(f\"Total chunks creados (reducido): {len(docs_texts)}\")"
+      ],
+      "metadata": {
+        "id": "T0pN-3eKbOKH",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "740cc2df-4b82-4168-ea82-a1df0a01fbd1"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Dataset reducido a: 2000 documentos.\n",
+            "Texto limpio de la primera receta (ej.): No-Bake Nut Cookies Ingredients: - 1 c. firmly packed brown sugar - 1/2 c. evaporated milk - 1/2 tsp. vanilla - 1/2 c. broken nuts (pecans) - 2 Tbsp. butter or margarine - 3 1/2 c. bite size shredded rice biscuits Directions: - In a heavy 2-quart saucepan, mix brown sugar, nuts, evaporated milk and \n",
+            "Documentos después de filtrar y limpiar: 2000\n",
+            "Total chunks creados (reducido): 2782\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from langchain_community.embeddings import HuggingFaceEmbeddings\n",
+        "from langchain_community.vectorstores import FAISS\n",
+        "import torch\n",
+        "\n",
+        "# Determinar el dispositivo disponible (GPU si Colab la asignó)\n",
+        "DEVICE = \"cuda\" if torch.cuda.is_available() else \"cpu\"\n",
+        "EMB_MODEL = \"sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2\"\n",
+        "\n",
+        "print(f\"\\n--- 1. Vectorización Optimizada (Encoder) ---\")\n",
+        "print(f\"Dispositivo de procesamiento: {DEVICE}\")\n",
+        "print(f\"Cargando modelo de embedding: {EMB_MODEL}...\")\n",
+        "\n",
+        "# *** CAMBIO CLAVE: Especificar device y usar batch_size ***\n",
+        "# batch_size=128 permite procesar 128 chunks al mismo tiempo en la GPU, acelerando el proceso\n",
+        "embeddings = HuggingFaceEmbeddings(\n",
+        "    model_name=EMB_MODEL,\n",
+        "    model_kwargs={'device': DEVICE},\n",
+        "    encode_kwargs={'batch_size': 128} # Aumenta la velocidad usando lotes\n",
+        ")\n",
+        "\n",
+        "# 2. Creación del Vector Store\n",
+        "print(\"Creando FAISS vectorstore...\")\n",
+        "# Este paso ahora será mucho más rápido\n",
+        "vectorstore = FAISS.from_texts(\n",
+        "    texts=docs_texts,\n",
+        "    embedding=embeddings,\n",
+        "    metadatas=docs_meta\n",
+        ")\n",
+        "\n",
+        "print(\"FAISS vectorstore creada exitosamente.\")\n",
+        "\n",
+        "# Persistir la base de datos (vital si el proceso falla, para no rehacerlo)\n",
+        "FAISS_PATH = \"/content/recetas_faiss_index\"\n",
+        "vectorstore.save_local(FAISS_PATH)\n",
+        "print(f\"Vectorstore guardada localmente en: {FAISS_PATH}\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "1ecms8Olb4d0",
+        "outputId": "855d29f8-7af8-4491-e19a-db19593a8b78"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "\n",
+            "--- 1. Vectorización Optimizada (Encoder) ---\n",
+            "Dispositivo de procesamiento: cpu\n",
+            "Cargando modelo de embedding: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2...\n",
+            "Creando FAISS vectorstore...\n",
+            "FAISS vectorstore creada exitosamente.\n",
+            "Vectorstore guardada localmente en: /content/recetas_faiss_index\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "def retrieve_recipes(query: str, k: int = 4):\n",
+        "    \"\"\"\n",
+        "    Realiza una consulta a la base de datos vectorial y retorna los k chunks más relevantes.\n",
+        "    \"\"\"\n",
+        "    print(f\"\\n--- 2. Consultando el RAG (Retrieval) ---\")\n",
+        "\n",
+        "    # Usamos similarity_search_with_score para ver tanto el chunk como su relevancia\n",
+        "    relevant_chunks_with_scores = vectorstore.similarity_search_with_score(query, k=k)\n",
+        "\n",
+        "    print(f\"\\nConsulta: '{query}'\")\n",
+        "    print(f\"Top {k} chunks más relevantes encontrados:\")\n",
+        "\n",
+        "    results = []\n",
+        "    for i, (chunk_doc, score) in enumerate(relevant_chunks_with_scores):\n",
+        "        print(f\"--- Resultado {i+1} (Score: {score:.4f}) ---\")\n",
+        "        # El page_content es el chunk de texto real\n",
+        "        print(f\"Contenido (inicio): {chunk_doc.page_content[:300]}...\")\n",
+        "        print(f\"Metadatos: Doc ID={chunk_doc.metadata['doc_id']}, Chunk ID={chunk_doc.metadata['chunk']}\")\n",
+        "        results.append(chunk_doc)\n",
+        "    return results\n",
+        "\n",
+        "# --- Ejemplos de Consulta ---\n",
+        "# Recuperar 3 chunks sobre recetas de postres\n",
+        "postre_query = \"¿Recetas rápidas sin horno con chocolate?\"\n",
+        "retrieved_postres = retrieve_recipes(postre_query, k=3)\n",
+        "\n",
+        "print(\"\\n--------------------------------------------------\")\n",
+        "\n",
+        "# Recuperar 5 chunks sobre recetas de pollo\n",
+        "pollo_query = \"¿Cómo marinar y asar pollo al horno para que quede jugoso?\"\n",
+        "retrieved_pollo = retrieve_recipes(pollo_query, k=5)"
+      ],
+      "metadata": {
+        "id": "wQu7ggOBb_bK",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "1f4d49ae-9f5f-4c81-fd2e-4017f1ba631a"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "\n",
+            "--- 2. Consultando el RAG (Retrieval) ---\n",
+            "\n",
+            "Consulta: '¿Recetas rápidas sin horno con chocolate?'\n",
+            "Top 3 chunks más relevantes encontrados:\n",
+            "--- Resultado 1 (Score: 12.9850) ---\n",
+            "Contenido (inicio): . - Chill until needed. - Melt chocolate in the top of a double boiler. - Allow to cool. - Cream together butter and sugar. - Add eggs, one at a time, beating well. Mix in melted, cooled chocolate. - Sift together flour, baking soda and salt and add gradually to chocolate mixture, alternating with b...\n",
+            "Metadatos: Doc ID=1070, Chunk ID=1\n",
+            "--- Resultado 2 (Score: 14.0440) ---\n",
+            "Contenido (inicio): . chocolate syrup - 2 tsp. vanilla extract - 4 oz. white chocolate, chopped - 2 Tbsp. plus 2 tsp. shortening, divided - chocolate and white chocolate leaves (optional) Directions: - Cream butter in a large mixing bowl; gradually add sugar, beating well at medium speed of an electric mixer. - Add egg...\n",
+            "Metadatos: Doc ID=1223, Chunk ID=1\n",
+            "--- Resultado 3 (Score: 14.1675) ---\n",
+            "Contenido (inicio): . - Cook and - stir - over - medium-high heat until mixture boils. - Remove from heat; - pour over crackers. - Bake - in a - 400° - oven 5 minutes. - Remove - from - oven. Immediately sprinkle with chocolate pieces. - When chocolate is soft, spread over top of sugar mixture. - Sprinkle - with - nuts...\n",
+            "Metadatos: Doc ID=679, Chunk ID=1\n",
+            "\n",
+            "--------------------------------------------------\n",
+            "\n",
+            "--- 2. Consultando el RAG (Retrieval) ---\n",
+            "\n",
+            "Consulta: '¿Cómo marinar y asar pollo al horno para que quede jugoso?'\n",
+            "Top 5 chunks más relevantes encontrados:\n",
+            "--- Resultado 1 (Score: 7.3585) ---\n",
+            "Contenido (inicio): . - Coat chicken in flour mixture and cook in oil until brown. - Remove drippings from pan. Return chicken to pan. - In a bowl mix peach preserves, barbecue sauce, soy sauce and onion; mix well. - Cover chicken with sauce and bring to a boil. - Reduce heat to low and cook 40 minutes. - Add water che...\n",
+            "Metadatos: Doc ID=1558, Chunk ID=1\n",
+            "--- Resultado 2 (Score: 7.6812) ---\n",
+            "Contenido (inicio): . - If chicken stock is available, use enough to moisten breads (if not use water). - Heat butter in skillet and add meat, onions, bell pepper, pepper and garlic. - Cook until meat is done. - Add seasonings. - Mix lightly, add bread to mixture. - Toss lightly with fork and add eggs; toss again. - Pu...\n",
+            "Metadatos: Doc ID=661, Chunk ID=1\n",
+            "--- Resultado 3 (Score: 7.8301) ---\n",
+            "Contenido (inicio): . - Put olive oil, 1 Tbsp. butter and the chicken into a saute pan on medium heat. - While sauteing chicken, add a dash of garlic powder, a dash of onion powder and Italian seasoning to taste. - Once the chicken is cooked through, add in the tomatoes, olives and mushrooms. - Check flavor and add add...\n",
+            "Metadatos: Doc ID=667, Chunk ID=1\n",
+            "--- Resultado 4 (Score: 8.2651) ---\n",
+            "Contenido (inicio): . - Add onion over top of chicken. - Sprinkle with tarragon. - Bring to boil and reduce heat to medium. - Cover skillet with well-fitting lid and cook approximately 30 to 45 minutes or until chicken is done. Add a little water if necessary to replace any lost in steam....\n",
+            "Metadatos: Doc ID=344, Chunk ID=1\n",
+            "--- Resultado 5 (Score: 8.4194) ---\n",
+            "Contenido (inicio): . - Dip chicken pieces in egg mixture and shake off excess. - Shake a few pieces in the bag at a time, coating well. - In an electric skillet, heat 1/4-inch oil to 350°. - Brown chicken on all sides. - Reduce heat to 275° and continue cooking for 30 minutes. - Makes 6 to 8 servings....\n",
+            "Metadatos: Doc ID=1580, Chunk ID=1\n"
+          ]
+        }
+      ]
+    }
+  ]
+}
