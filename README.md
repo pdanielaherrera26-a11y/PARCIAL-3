@@ -4,7 +4,7 @@
 
 Este proyecto implementa un sistema RAG (Retrieval-Augmented Generation) diseñado para buscar y generar explicaciones detalladas de recetas culinarias. El sistema combina técnicas avanzadas de recuperación de información con modelos de lenguaje natural para proporcionar respuestas precisas y contextualizadas sobre preparación de alimentos.
 
-Desarrollado como parte del Parcial 3 de la asignatura Inteligencia Artificial Aplicada a la Economía (H2), este RAG demuestra cómo la inteligencia artificial puede facilitar el acceso a conocimiento culinario de manera intuitiva y en el idioma del usuario.
+Desarrollado como parte del Parcial 3 de la asignatura Inteligencia Artificial Aplicada a la Economía (HE2), este RAG demuestra cómo la inteligencia artificial puede facilitar el acceso a conocimiento culinario de manera intuitiva y en el idioma del usuario.
 
 ## Integrantes del Equipo
 
@@ -73,4 +73,4 @@ Este proyecto fue desarrollado con fines académicos para la Universidad de los 
 
 **Fecha de Entrega**: Diciembre 11, 2025  
 **Institución**: Universidad de los Andes  
-**Curso**: H2 - Inteligencia Artificial Aplicada a la Economía
+**Curso**: HE2 - Inteligencia Artificial Aplicada a la Economía
